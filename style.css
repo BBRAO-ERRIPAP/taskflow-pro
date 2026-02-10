@@ -691,7 +691,7 @@ body {
     font-size: var(--font-size-xs);
     font-weight: 600;
     padding: 2px 6px;
-    border-radius: var(--border-radius-full);
+    border-radius: 100px;
     min-width: 20px;
     text-align: center;
 }
@@ -838,7 +838,7 @@ body {
     gap: var(--space-3);
 }
 
-/* Task Items */
+/* Task Items - Drag and Drop Styles */
 .task-item {
     background: var(--surface-color);
     border-radius: var(--border-radius-lg);
@@ -849,12 +849,33 @@ body {
     border: 2px solid var(--border-color);
     transition: all var(--transition-fast);
     position: relative;
+    cursor: grab;
+    user-select: none;
 }
 
 .task-item:hover {
     border-color: var(--primary-color);
     transform: translateY(-1px);
     box-shadow: var(--shadow-sm);
+}
+
+.task-item:active {
+    cursor: grabbing;
+}
+
+.task-item.dragging {
+    opacity: 0.5;
+    background: var(--primary-color);
+    color: white;
+    transform: scale(1.02);
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+}
+
+.task-item.drag-over {
+    border: 2px dashed var(--primary-color);
+    background: var(--info-bg);
+    transform: scale(1.01);
 }
 
 .task-item.priority-high {
@@ -909,7 +930,7 @@ body {
 
 .task-priority {
     padding: 2px 8px;
-    border-radius: var(--border-radius-full);
+    border-radius: 100px;
     font-size: var(--font-size-xs);
     font-weight: 600;
     text-transform: uppercase;
@@ -935,7 +956,7 @@ body {
     align-items: center;
     gap: 4px;
     padding: 2px 8px;
-    border-radius: var(--border-radius-full);
+    border-radius: 100px;
     background: var(--border-color);
     color: var(--text-primary);
     font-size: var(--font-size-xs);
@@ -946,7 +967,7 @@ body {
     align-items: center;
     gap: 4px;
     padding: 2px 8px;
-    border-radius: var(--border-radius-full);
+    border-radius: 100px;
     background: var(--border-color);
     color: var(--text-primary);
     font-size: var(--font-size-xs);
@@ -999,6 +1020,25 @@ body {
 .delete-btn:hover {
     background: var(--danger-bg);
     color: var(--danger-color);
+}
+
+/* Drag Handle */
+.drag-handle {
+    cursor: grab;
+    color: var(--text-muted);
+    padding: var(--space-2);
+    margin-right: var(--space-1);
+    border-radius: var(--border-radius-sm);
+    transition: all var(--transition-fast);
+}
+
+.drag-handle:hover {
+    background: var(--border-color);
+    color: var(--text-primary);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
 }
 
 /* Empty State */

@@ -1,5 +1,6 @@
 // ==========================================
 // TASKFLOW PRO - COMPLETE & WORKING JAVASCRIPT
+// WITH DRAG AND DROP REORDERING
 // ==========================================
 
 'use strict';
@@ -7,7 +8,7 @@
 // Configuration
 const CONFIG = {
     STORAGE_KEY: 'taskflow_tasks',
-    VERSION: '1.1.0',
+    VERSION: '1.3.0', // Updated version for drag-and-drop
     TOAST_DURATION: 3000,
     UNDO_DURATION: 5000
 };
@@ -21,6 +22,8 @@ class TaskManager {
         this.searchQuery = '';
         this.deletedTask = null;
         this.undoTimeout = null;
+        this.draggedTaskId = null;
+        this.dragTargetId = null;
     }
     
     loadTasks() {
@@ -50,7 +53,8 @@ class TaskManager {
             dueDate: taskData.dueDate || null,
             completed: false,
             completedAt: null,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            order: this.tasks.length // Add order property for drag-and-drop
         };
         
         this.tasks.unshift(task);
@@ -117,6 +121,30 @@ class TaskManager {
         }
     }
     
+    // NEW: Reorder tasks based on drag-and-drop
+    reorderTasks(draggedId, targetId) {
+        const draggedIndex = this.tasks.findIndex(task => task.id === draggedId);
+        const targetIndex = this.tasks.findIndex(task => task.id === targetId);
+        
+        if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
+            return false;
+        }
+        
+        // Remove the dragged task
+        const [draggedTask] = this.tasks.splice(draggedIndex, 1);
+        
+        // Insert it at the target position
+        this.tasks.splice(targetIndex, 0, draggedTask);
+        
+        // Update order property for all tasks
+        this.tasks.forEach((task, index) => {
+            task.order = index;
+        });
+        
+        this.saveTasks();
+        return true;
+    }
+    
     getFilteredTasks() {
         let filtered = [...this.tasks];
         
@@ -139,8 +167,14 @@ class TaskManager {
             );
         }
         
-        // Apply sort
-        filtered.sort(this.getSortFunction());
+        // Apply sort - but preserve drag order for manual sorting
+        if (this.sort === 'manual') {
+            // Sort by order property (set during drag-and-drop)
+            filtered.sort((a, b) => a.order - b.order);
+        } else {
+            // Apply other sorts
+            filtered.sort(this.getSortFunction());
+        }
         
         return filtered;
     }
@@ -159,6 +193,9 @@ class TaskManager {
                 return (a, b) => priorityOrder[a.priority] - priorityOrder[b.priority];
             case 'name':
                 return (a, b) => a.text.localeCompare(b.text);
+            case 'manual':
+                // Already handled in getFilteredTasks
+                return (a, b) => a.order - b.order;
             default:
                 return (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
         }
@@ -187,7 +224,6 @@ class TaskManager {
         return { total, completed, pending, productivity };
     }
     
-    // IMPROVED STREAK CALCULATION FUNCTION - Production-level robust
     calculateStreak() {
         if (this.tasks.length === 0) return 0;
         
@@ -283,7 +319,8 @@ class TaskManager {
                         dueDate: task.dueDate || null,
                         completed: Boolean(task.completed),
                         completedAt: task.completedAt || null,
-                        createdAt: task.createdAt || new Date().toISOString()
+                        createdAt: task.createdAt || new Date().toISOString(),
+                        order: task.order || this.tasks.length
                     });
                 }
             });
@@ -296,18 +333,24 @@ class TaskManager {
     }
 }
 
-// UI Controller
+// UI Controller with Drag-and-Drop
 class UIController {
     constructor(taskManager) {
         this.taskManager = taskManager;
+        this.modals = {
+            shortcuts: null,
+            export: null
+        };
         this.init();
     }
     
     init() {
         this.cacheDOM();
+        this.initModals();
         this.bindEvents();
         this.initTheme();
         this.initDate();
+        this.initDragAndDrop();
         this.render();
     }
     
@@ -370,6 +413,86 @@ class UIController {
         this.currentYear = document.getElementById('currentYear');
     }
     
+    initModals() {
+        // Keyboard Shortcuts Modal
+        this.modals.shortcuts = {
+            element: this.shortcutsModal,
+            closeBtn: this.shortcutsModal.querySelector('.modal-close'),
+            cancelBtn: document.getElementById('closeShortcuts'),
+            isInitialized: false
+        };
+        
+        // Export Modal
+        this.modals.export = {
+            element: this.exportModal,
+            closeBtn: this.exportModal.querySelector('.modal-close'),
+            cancelBtn: document.getElementById('cancelExport'),
+            exportBtn: document.getElementById('exportJsonBtn'),
+            copyBtn: document.getElementById('copyExportBtn'),
+            exportData: document.getElementById('exportData'),
+            isInitialized: false
+        };
+        
+        // Initialize event listeners for modals
+        this.initModalEventListeners();
+    }
+    
+    initModalEventListeners() {
+        // Shortcuts Modal
+        if (!this.modals.shortcuts.isInitialized) {
+            const closeShortcutsModal = () => this.closeModal('shortcuts');
+            
+            this.modals.shortcuts.closeBtn.addEventListener('click', closeShortcutsModal);
+            this.modals.shortcuts.cancelBtn.addEventListener('click', closeShortcutsModal);
+            this.modals.shortcuts.element.addEventListener('click', (e) => {
+                if (e.target === this.modals.shortcuts.element) closeShortcutsModal();
+            });
+            
+            this.modals.shortcuts.isInitialized = true;
+        }
+        
+        // Export Modal
+        if (!this.modals.export.isInitialized) {
+            const closeExportModal = () => this.closeModal('export');
+            
+            // Close buttons
+            this.modals.export.closeBtn.addEventListener('click', closeExportModal);
+            this.modals.export.cancelBtn.addEventListener('click', closeExportModal);
+            this.modals.export.element.addEventListener('click', (e) => {
+                if (e.target === this.modals.export.element) closeExportModal();
+            });
+            
+            // Export button
+            this.modals.export.exportBtn.addEventListener('click', () => {
+                const data = this.taskManager.exportTasks();
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `tasks-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                closeExportModal();
+                this.showToast('Tasks exported successfully!', 'success');
+            });
+            
+            // Copy button
+            this.modals.export.copyBtn.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(this.modals.export.exportData.value);
+                    this.showToast('Copied to clipboard!', 'success');
+                } catch (err) {
+                    this.modals.export.exportData.select();
+                    document.execCommand('copy');
+                    this.showToast('Copied to clipboard!', 'success');
+                }
+            });
+            
+            this.modals.export.isInitialized = true;
+        }
+    }
+    
     bindEvents() {
         // Form submission
         this.taskForm.addEventListener('submit', (e) => {
@@ -409,7 +532,12 @@ class UIController {
             });
         });
         
-        // Sort
+        // Sort - Add manual option
+        const manualOption = document.createElement('option');
+        manualOption.value = 'manual';
+        manualOption.textContent = 'Manual (Drag Order)';
+        this.sortSelect.appendChild(manualOption);
+        
         this.sortSelect.addEventListener('change', () => {
             this.taskManager.sort = this.sortSelect.value;
             this.render();
@@ -472,11 +600,115 @@ class UIController {
             if (e.key === 'Escape') {
                 this.closeAllModals();
             }
+            
+            // Space: Toggle completion on selected task
+            if (e.key === ' ' && !e.ctrlKey && !e.metaKey) {
+                const focusedElement = document.activeElement;
+                if (!focusedElement.matches('input, textarea, button, select')) {
+                    e.preventDefault();
+                    const taskItem = focusedElement.closest('.task-item');
+                    if (taskItem) {
+                        const taskId = taskItem.dataset.id;
+                        const checkbox = taskItem.querySelector('.task-checkbox');
+                        if (checkbox) {
+                            checkbox.checked = !checkbox.checked;
+                            this.taskManager.toggleTaskCompletion(taskId);
+                            this.render();
+                        }
+                    }
+                }
+            }
         });
         
         // Show shortcuts button
         document.getElementById('showShortcuts').addEventListener('click', () => {
             this.showShortcutsModal();
+        });
+    }
+    
+    // NEW: Initialize drag and drop event handlers
+    initDragAndDrop() {
+        // These will be attached to individual task elements in renderTaskList
+    }
+    
+    // NEW: Setup drag and drop for a task element
+    setupDragAndDrop(taskElement) {
+        const taskId = taskElement.dataset.id;
+        
+        // Drag start
+        taskElement.addEventListener('dragstart', (e) => {
+            this.taskManager.draggedTaskId = taskId;
+            taskElement.classList.add('dragging');
+            
+            // Set drag image (optional)
+            e.dataTransfer.effectAllowed = 'move';
+            
+            // Add some data to satisfy Firefox
+            e.dataTransfer.setData('text/plain', taskId);
+        });
+        
+        // Drag end
+        taskElement.addEventListener('dragend', (e) => {
+            taskElement.classList.remove('dragging');
+            
+            // Remove drag-over class from all tasks
+            document.querySelectorAll('.task-item.drag-over').forEach(item => {
+                item.classList.remove('drag-over');
+            });
+            
+            // Reset dragged task
+            this.taskManager.draggedTaskId = null;
+            this.taskManager.dragTargetId = null;
+        });
+        
+        // Drag over
+        taskElement.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            
+            // Only highlight if it's not the dragged element itself
+            if (this.taskManager.draggedTaskId !== taskId) {
+                taskElement.classList.add('drag-over');
+                this.taskManager.dragTargetId = taskId;
+            }
+        });
+        
+        // Drag leave
+        taskElement.addEventListener('dragleave', (e) => {
+            // Only remove highlight if leaving the element (not just moving between children)
+            if (!taskElement.contains(e.relatedTarget)) {
+                taskElement.classList.remove('drag-over');
+                if (this.taskManager.dragTargetId === taskId) {
+                    this.taskManager.dragTargetId = null;
+                }
+            }
+        });
+        
+        // Drop
+        taskElement.addEventListener('drop', (e) => {
+            e.preventDefault();
+            
+            const draggedId = this.taskManager.draggedTaskId;
+            const targetId = taskId;
+            
+            if (draggedId && targetId && draggedId !== targetId) {
+                // Reorder tasks
+                const success = this.taskManager.reorderTasks(draggedId, targetId);
+                
+                if (success) {
+                    // Update sort to manual
+                    this.sortSelect.value = 'manual';
+                    this.taskManager.sort = 'manual';
+                    
+                    // Re-render
+                    this.render();
+                    
+                    // Show success toast
+                    this.showToast('Task order updated', 'success');
+                }
+            }
+            
+            taskElement.classList.remove('drag-over');
         });
     }
     
@@ -528,6 +760,9 @@ class UIController {
         tasks.forEach(task => {
             const taskElement = this.createTaskElement(task);
             fragment.appendChild(taskElement);
+            
+            // Setup drag and drop for this element
+            this.setupDragAndDrop(taskElement);
         });
         
         this.taskList.innerHTML = '';
@@ -539,6 +774,8 @@ class UIController {
         div.className = `task-item priority-${task.priority} ${task.completed ? 'completed' : ''}`;
         div.dataset.id = task.id;
         div.draggable = true;
+        div.tabIndex = 0; // Make task focusable for keyboard accessibility
+        div.setAttribute('aria-label', `Task: ${task.text}. Drag to reorder.`);
         
         // Checkbox
         const checkbox = document.createElement('input');
@@ -612,6 +849,14 @@ class UIController {
         actions.appendChild(editBtn);
         actions.appendChild(deleteBtn);
         
+        // NEW: Drag handle
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'drag-handle';
+        dragHandle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+        dragHandle.title = 'Drag to reorder';
+        dragHandle.setAttribute('aria-label', 'Drag handle');
+        
+        div.appendChild(dragHandle);
         div.appendChild(checkbox);
         div.appendChild(content);
         div.appendChild(actions);
@@ -945,48 +1190,8 @@ class UIController {
     
     showExportModal() {
         const data = this.taskManager.exportTasks();
-        document.getElementById('exportData').value = data;
-        this.exportModal.style.display = 'flex';
-        
-        // Setup export modal events
-        const closeBtn = this.exportModal.querySelector('.modal-close');
-        const cancelBtn = document.getElementById('cancelExport');
-        const exportBtn = document.getElementById('exportJsonBtn');
-        const copyBtn = document.getElementById('copyExportBtn');
-        
-        const closeModal = () => {
-            this.exportModal.style.display = 'none';
-        };
-        
-        closeBtn.addEventListener('click', closeModal);
-        cancelBtn.addEventListener('click', closeModal);
-        this.exportModal.addEventListener('click', (e) => {
-            if (e.target === this.exportModal) closeModal();
-        });
-        
-        exportBtn.addEventListener('click', () => {
-            const blob = new Blob([data], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `tasks-${new Date().toISOString().split('T')[0]}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-            
-            closeModal();
-            this.showToast('Tasks exported successfully!', 'success');
-        });
-        
-        copyBtn.addEventListener('click', async () => {
-            try {
-                await navigator.clipboard.writeText(data);
-                this.showToast('Copied to clipboard!', 'success');
-            } catch (err) {
-                document.getElementById('exportData').select();
-                document.execCommand('copy');
-                this.showToast('Copied to clipboard!', 'success');
-            }
-        });
+        this.modals.export.exportData.value = data;
+        this.modals.export.element.style.display = 'flex';
     }
     
     handleImport() {
@@ -1016,25 +1221,21 @@ class UIController {
     }
     
     showShortcutsModal() {
-        this.shortcutsModal.style.display = 'flex';
-        
-        const closeBtn = this.shortcutsModal.querySelector('.modal-close');
-        const closeShortcuts = document.getElementById('closeShortcuts');
-        
-        const closeModal = () => {
-            this.shortcutsModal.style.display = 'none';
-        };
-        
-        closeBtn.addEventListener('click', closeModal);
-        closeShortcuts.addEventListener('click', closeModal);
-        this.shortcutsModal.addEventListener('click', (e) => {
-            if (e.target === this.shortcutsModal) closeModal();
-        });
+        this.modals.shortcuts.element.style.display = 'flex';
+    }
+    
+    closeModal(modalName) {
+        if (this.modals[modalName]) {
+            this.modals[modalName].element.style.display = 'none';
+        }
     }
     
     closeAllModals() {
-        this.shortcutsModal.style.display = 'none';
-        this.exportModal.style.display = 'none';
+        Object.values(this.modals).forEach(modal => {
+            if (modal && modal.element) {
+                modal.element.style.display = 'none';
+            }
+        });
     }
     
     showToast(message, type = 'info') {
@@ -1122,7 +1323,13 @@ document.addEventListener('DOMContentLoaded', () => {
         window.taskManager = taskManager;
         window.uiController = uiController;
         
-        console.log('✅ TaskFlow Pro initialized successfully!');
+        console.log('✅ TaskFlow Pro initialized with drag-and-drop!');
+        console.log('📋 Features:');
+        console.log('  • Drag and drop reordering');
+        console.log('  • Visual feedback while dragging');
+        console.log('  • Order persists in localStorage');
+        console.log('  • Production-ready implementation');
+        
     } catch (error) {
         console.error('❌ Failed to initialize:', error);
         alert('Failed to initialize application. Please refresh the page.');
