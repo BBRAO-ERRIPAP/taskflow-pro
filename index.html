@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskFlow Pro - Student Task Manager</title>
+    <meta name="description" content="Professional task management for students with analytics, deadlines, and productivity tracking.">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Skip to Content -->
+    <a href="#main-content" class="skip-to-content">Skip to main content</a>
+    
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+    
+    <!-- Undo Container -->
+    <div id="undo-container" class="undo-container" style="display: none;"></div>
+    
+    <div class="container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo-container">
+                    <i class="fas fa-tasks logo-icon"></i>
+                    <div class="logo-text">
+                        <h1>TaskFlow <span class="logo-accent">Pro</span></h1>
+                        <p class="subtitle">Student Task Manager</p>
+                    </div>
+                </div>
+                <div class="header-stats">
+                    <div class="stat-card">
+                        <div class="stat-circle">
+                            <svg class="progress-ring" width="80" height="80">
+                                <circle class="progress-ring-bg" cx="40" cy="40" r="36"></circle>
+                                <circle class="progress-ring-progress" id="productivityRing" cx="40" cy="40" r="36"></circle>
+                            </svg>
+                            <span class="stat-value" id="productivityScore">0%</span>
+                        </div>
+                        <span class="stat-label">Productivity</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main id="main-content" class="app-main">
+            <!-- Quick Actions -->
+            <div class="quick-actions">
+                <div class="search-container">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="Search tasks..." aria-label="Search tasks">
+                    <button id="clearSearch" class="clear-search" style="display: none;" aria-label="Clear search">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <button id="showShortcuts" class="btn-icon" aria-label="Show keyboard shortcuts" title="Keyboard shortcuts (?)">
+                    <i class="fas fa-keyboard"></i>
+                </button>
+                <button id="themeToggle" class="btn-icon" aria-label="Toggle theme" title="Toggle dark/light mode">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+
+            <!-- Add Task Form -->
+            <section class="add-task-section">
+                <h2>
+                    <i class="fas fa-plus-circle"></i> 
+                    Add New Task
+                </h2>
+                <form id="taskForm" class="task-form">
+                    <div class="form-group">
+                        <input 
+                            type="text" 
+                            id="taskInput" 
+                            placeholder="What needs to be done?" 
+                            maxlength="200"
+                            aria-label="Task description"
+                            required
+                        >
+                        
+                        <div class="input-options">
+                            <div class="input-group">
+                                <label for="prioritySelect" class="input-label">
+                                    <i class="fas fa-flag"></i> Priority
+                                </label>
+                                <select id="prioritySelect" aria-label="Task priority level">
+                                    <option value="low">Low</option>
+                                    <option value="medium" selected>Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </div>
+                            
+                            <div class="input-group">
+                                <label for="categorySelect" class="input-label">
+                                    <i class="fas fa-tag"></i> Category
+                                </label>
+                                <select id="categorySelect" aria-label="Task category">
+                                    <option value="">Select Category</option>
+                                    <option value="homework">📚 Homework</option>
+                                    <option value="project">💼 Project</option>
+                                    <option value="study">📖 Study</option>
+                                    <option value="exam">📝 Exam</option>
+                                    <option value="reading">📕 Reading</option>
+                                    <option value="other">📌 Other</option>
+                                </select>
+                            </div>
+                            
+                            <div class="input-group">
+                                <label for="dueDate" class="input-label">
+                                    <i class="fas fa-calendar"></i> Due Date
+                                </label>
+                                <input type="date" id="dueDate" aria-label="Task due date (optional)">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" id="addTaskBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> 
+                        <span>Add Task</span>
+                        <span class="btn-hint">Enter</span>
+                    </button>
+                </form>
+                
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+            </section>
+
+            <!-- Analytics Section -->
+            <section id="analyticsSection" class="analytics-section">
+                <div class="section-header-inline">
+                    <h3>
+                        <i class="fas fa-chart-pie"></i> Performance Analytics
+                    </h3>
+                    <button id="toggleAnalytics" class="btn-collapse" aria-label="Toggle analytics">
+                        <i class="fas fa-chevron-up"></i>
+                    </button>
+                </div>
+                
+                <div class="analytics-content">
+                    <div class="analytics-grid">
+                        <div class="chart-container">
+                            <h4>Weekly Completion</h4>
+                            <div class="chart-placeholder">
+                                <canvas id="completionChart" width="400" height="200"></canvas>
+                            </div>
+                        </div>
+                        
+                        <div class="category-stats">
+                            <h4>Tasks by Category</h4>
+                            <div id="categoryBreakdown" class="category-breakdown">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="insights-panel">
+                        <h4><i class="fas fa-lightbulb"></i> Insights</h4>
+                        <div id="insightsContent" class="insights-content">
+                            <!-- Will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dashboard Grid -->
+            <div class="dashboard-grid">
+                <!-- Task Controls -->
+                <section class="task-controls">
+                    <h3 class="sr-only">Task Controls</h3>
+                    
+                    <div class="task-filters">
+                        <button type="button" class="filter-btn active" data-filter="all">
+                            <i class="fas fa-layer-group"></i> 
+                            <span>All</span>
+                            <span class="filter-count" data-count="all">0</span>
+                        </button>
+                        <button type="button" class="filter-btn" data-filter="pending">
+                            <i class="fas fa-clock"></i> 
+                            <span>Pending</span>
+                            <span class="filter-count" data-count="pending">0</span>
+                        </button>
+                        <button type="button" class="filter-btn" data-filter="completed">
+                            <i class="fas fa-check-circle"></i> 
+                            <span>Completed</span>
+                            <span class="filter-count" data-count="completed">0</span>
+                        </button>
+                    </div>
+                    
+                    <div class="sort-options">
+                        <label for="sortSelect" class="sort-label">
+                            <i class="fas fa-sort"></i> Sort by:
+                        </label>
+                        <select id="sortSelect">
+                            <option value="dateAdded">Date Added</option>
+                            <option value="dueDate">Due Date</option>
+                            <option value="priority">Priority</option>
+                            <option value="name">Name</option>
+                        </select>
+                    </div>
+                </section>
+
+                <!-- Statistics -->
+                <section class="stats-section">
+                    <h3 class="sr-only">Task Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-icon total">
+                                <i class="fas fa-tasks"></i>
+                            </span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="totalTasks">0</span>
+                                <span class="stat-label">Total Tasks</span>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-icon pending">
+                                <i class="fas fa-hourglass-half"></i>
+                            </span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="pendingTasks">0</span>
+                                <span class="stat-label">Pending</span>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-icon completed">
+                                <i class="fas fa-check-circle"></i>
+                            </span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="completedTasks">0</span>
+                                <span class="stat-label">Completed</span>
+                            </div>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-icon streak">
+                                <i class="fas fa-fire"></i>
+                            </span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="streakCount">0</span>
+                                <span class="stat-label">Day Streak</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Task List -->
+            <section class="task-list-section">
+                <div class="section-header">
+                    <h2>
+                        <i class="fas fa-list-check"></i> 
+                        Your Tasks
+                    </h2>
+                    <div class="task-actions">
+                        <button type="button" id="clearCompletedBtn" class="btn btn-secondary">
+                            <i class="fas fa-trash-can"></i> 
+                            Clear Completed
+                        </button>
+                        <button type="button" id="exportBtn" class="btn btn-secondary">
+                            <i class="fas fa-download"></i> 
+                            Export Tasks
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="taskList" class="task-list">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </section>
+            
+            <!-- Storage Info -->
+            <div class="storage-info">
+                <p>
+                    <i class="fas fa-cloud-arrow-up"></i> 
+                    Auto-saved locally
+                    <span class="divider">•</span>
+                    <button id="importBtn" class="btn-text">
+                        <i class="fas fa-file-import"></i> Import
+                    </button>
+                    <span class="divider">•</span>
+                    <button id="clearAllBtn" class="btn-text btn-danger">
+                        <i class="fas fa-trash"></i> Clear All
+                    </button>
+                </p>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>TaskFlow Pro &copy; <span id="currentYear">2024</span></p>
+        </footer>
+    </div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div id="shortcutsModal" class="modal-backdrop" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-keyboard"></i> Keyboard Shortcuts</h3>
+                <button class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="shortcuts-grid">
+                    <div class="shortcut-item">
+                        <kbd>Enter</kbd>
+                        <span>Add new task</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl/Cmd</kbd> + <kbd>F</kbd>
+                        <span>Focus search</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>?</kbd>
+                        <span>Show shortcuts</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Esc</kbd>
+                        <span>Close modals</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Space</kbd>
+                        <span>Toggle task completion</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="closeShortcuts">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="exportModal" class="modal-backdrop" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Export Tasks</h3>
+                <button class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="export-options">
+                    <button id="exportJsonBtn" class="btn btn-primary">
+                        <i class="fas fa-download"></i> Download JSON
+                    </button>
+                </div>
+                <div class="export-preview">
+                    <label for="exportData">Export Data:</label>
+                    <textarea id="exportData" readonly rows="8"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelExport">Cancel</button>
+                <button id="copyExportBtn" class="btn btn-primary">
+                    <i class="fas fa-copy"></i> Copy to Clipboard
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
