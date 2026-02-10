@@ -7,7 +7,7 @@
 // Configuration
 const CONFIG = {
     STORAGE_KEY: 'taskflow_tasks',
-    VERSION: '1.0.0',
+    VERSION: '1.1.0',
     TOAST_DURATION: 3000,
     UNDO_DURATION: 5000
 };
@@ -49,6 +49,7 @@ class TaskManager {
             category: taskData.category || '',
             dueDate: taskData.dueDate || null,
             completed: false,
+            completedAt: null,
             createdAt: new Date().toISOString()
         };
         
@@ -107,6 +108,11 @@ class TaskManager {
         const task = this.tasks.find(t => t.id === id);
         if (task) {
             task.completed = !task.completed;
+            if (task.completed) {
+                task.completedAt = new Date().toISOString();
+            } else {
+                task.completedAt = null;
+            }
             this.saveTasks();
         }
     }
@@ -181,6 +187,74 @@ class TaskManager {
         return { total, completed, pending, productivity };
     }
     
+    // IMPROVED STREAK CALCULATION FUNCTION - Production-level robust
+    calculateStreak() {
+        if (this.tasks.length === 0) return 0;
+        
+        // Get unique completion days using UTC timestamps for timezone safety
+        const uniqueDays = new Set();
+        
+        this.tasks.forEach(task => {
+            if (task.completed && task.completedAt) {
+                const date = new Date(task.completedAt);
+                // Use UTC to avoid timezone issues, normalize to start of day
+                const dayKey = Date.UTC(
+                    date.getUTCFullYear(),
+                    date.getUTCMonth(),
+                    date.getUTCDate()
+                );
+                uniqueDays.add(dayKey);
+            }
+        });
+        
+        if (uniqueDays.size === 0) return 0;
+        
+        // Convert to array and sort descending (most recent first)
+        const sortedDays = Array.from(uniqueDays).sort((a, b) => b - a);
+        
+        // Get today's date in UTC (start of day)
+        const now = new Date();
+        const today = Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate()
+        );
+        
+        // Get yesterday in UTC
+        const yesterday = today - 86400000; // 24 hours in milliseconds
+        
+        // Start counting from the most recent completion
+        let streak = 0;
+        let expectedDate = today;
+        
+        // Check if we have a completion today to start the streak
+        if (sortedDays[0] === today) {
+            streak = 1;
+            expectedDate = yesterday;
+        } else if (sortedDays[0] === yesterday) {
+            // Started yesterday, continue checking backward
+            streak = 1;
+            expectedDate = yesterday - 86400000;
+        } else {
+            // Most recent completion is older than yesterday, no active streak
+            return 0;
+        }
+        
+        // Continue checking for consecutive days
+        for (let i = 1; i < sortedDays.length; i++) {
+            if (sortedDays[i] === expectedDate) {
+                streak++;
+                expectedDate -= 86400000; // Move back one day
+            } else if (sortedDays[i] < expectedDate) {
+                // Found a gap, streak ends
+                break;
+            }
+            // If sortedDays[i] > expectedDate, it's a duplicate day (shouldn't happen due to Set)
+        }
+        
+        return streak;
+    }
+    
     exportTasks() {
         return JSON.stringify({
             version: CONFIG.VERSION,
@@ -208,6 +282,7 @@ class TaskManager {
                         category: task.category || '',
                         dueDate: task.dueDate || null,
                         completed: Boolean(task.completed),
+                        completedAt: task.completedAt || null,
                         createdAt: task.createdAt || new Date().toISOString()
                     });
                 }
@@ -641,13 +716,9 @@ class UIController {
         const offset = circumference - (stats.productivity / 100) * circumference;
         this.productivityRing.style.strokeDashoffset = offset;
         
-        // Calculate streak (simplified)
-        const today = new Date().toISOString().split('T')[0];
-        const completedToday = this.taskManager.tasks.filter(task => 
-            task.completed && task.createdAt.split('T')[0] === today
-        ).length;
-        
-        this.streakCount.textContent = completedToday > 0 ? '1' : '0';
+        // Calculate streak using the improved function
+        const streak = this.taskManager.calculateStreak();
+        this.streakCount.textContent = streak;
     }
     
     renderAnalytics() {
@@ -723,6 +794,7 @@ class UIController {
     renderInsights() {
         const stats = this.taskManager.getStats();
         const tasks = this.taskManager.tasks;
+        const streak = this.taskManager.calculateStreak();
         const insights = [];
         
         if (stats.total === 0) {
@@ -734,6 +806,19 @@ class UIController {
                 insights.push(`Good progress! ${stats.productivity}% of tasks completed.`);
             } else {
                 insights.push(`Keep going! ${stats.productivity}% completion rate.`);
+            }
+            
+            // Streak insight
+            if (streak > 0) {
+                if (streak >= 7) {
+                    insights.push(`🔥 Amazing ${streak}-day streak! Keep it up!`);
+                } else if (streak >= 3) {
+                    insights.push(`Nice ${streak}-day streak! Building momentum.`);
+                } else {
+                    insights.push(`You're on a ${streak}-day streak!`);
+                }
+            } else {
+                insights.push('Complete a task today to start your streak!');
             }
             
             const overdue = tasks.filter(task => {
