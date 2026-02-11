@@ -1283,7 +1283,7 @@ body {
     padding: var(--space-2);
     border-radius: var(--border-radius-sm);
     width: 32px;
-    height: 32px;
+    height = 32px;
     display: flex;
     align-items: center;
     justify-content: center;

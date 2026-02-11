@@ -1,6 +1,6 @@
 // ==========================================
-// TASKFLOW PRO - COMPLETE & WORKING JAVASCRIPT
-// WITH DRAG AND DROP REORDERING
+// TASKFLOW PRO - OPTIMIZED JAVASCRIPT
+// WITH PARTIAL DOM UPDATES & DRAG-AND-DROP
 // ==========================================
 
 'use strict';
@@ -8,7 +8,7 @@
 // Configuration
 const CONFIG = {
     STORAGE_KEY: 'taskflow_tasks',
-    VERSION: '1.3.0', // Updated version for drag-and-drop
+    VERSION: '1.4.0', // Updated version for optimized rendering
     TOAST_DURATION: 3000,
     UNDO_DURATION: 5000
 };
@@ -24,12 +24,22 @@ class TaskManager {
         this.undoTimeout = null;
         this.draggedTaskId = null;
         this.dragTargetId = null;
+        this.renderCache = new WeakMap(); // Cache for DOM elements
     }
     
     loadTasks() {
         try {
             const saved = localStorage.getItem(CONFIG.STORAGE_KEY);
-            return saved ? JSON.parse(saved) : [];
+            const tasks = saved ? JSON.parse(saved) : [];
+            
+            // Ensure all tasks have order property
+            tasks.forEach((task, index) => {
+                if (task.order === undefined) {
+                    task.order = index;
+                }
+            });
+            
+            return tasks;
         } catch (error) {
             console.error('Error loading tasks:', error);
             return [];
@@ -54,7 +64,7 @@ class TaskManager {
             completed: false,
             completedAt: null,
             createdAt: new Date().toISOString(),
-            order: this.tasks.length // Add order property for drag-and-drop
+            order: this.tasks.length
         };
         
         this.tasks.unshift(task);
@@ -77,6 +87,12 @@ class TaskManager {
         
         this.deletedTask = this.tasks[index];
         this.tasks.splice(index, 1);
+        
+        // Update order for remaining tasks
+        this.tasks.forEach((task, idx) => {
+            task.order = idx;
+        });
+        
         this.saveTasks();
         
         // Clear previous undo timeout
@@ -96,6 +112,11 @@ class TaskManager {
         if (!this.deletedTask) return false;
         
         this.tasks.unshift(this.deletedTask);
+        // Update order for all tasks
+        this.tasks.forEach((task, idx) => {
+            task.order = idx;
+        });
+        
         this.saveTasks();
         const task = this.deletedTask;
         this.deletedTask = null;
@@ -118,10 +139,11 @@ class TaskManager {
                 task.completedAt = null;
             }
             this.saveTasks();
+            return task; // Return updated task for partial update
         }
+        return null;
     }
     
-    // NEW: Reorder tasks based on drag-and-drop
     reorderTasks(draggedId, targetId) {
         const draggedIndex = this.tasks.findIndex(task => task.id === draggedId);
         const targetIndex = this.tasks.findIndex(task => task.id === targetId);
@@ -163,18 +185,12 @@ class TaskManager {
             const query = this.searchQuery.toLowerCase();
             filtered = filtered.filter(task => 
                 task.text.toLowerCase().includes(query) ||
-                task.category.toLowerCase().includes(query)
+                (task.category && task.category.toLowerCase().includes(query))
             );
         }
         
-        // Apply sort - but preserve drag order for manual sorting
-        if (this.sort === 'manual') {
-            // Sort by order property (set during drag-and-drop)
-            filtered.sort((a, b) => a.order - b.order);
-        } else {
-            // Apply other sorts
-            filtered.sort(this.getSortFunction());
-        }
+        // Apply sort
+        filtered.sort(this.getSortFunction());
         
         return filtered;
     }
@@ -194,7 +210,6 @@ class TaskManager {
             case 'name':
                 return (a, b) => a.text.localeCompare(b.text);
             case 'manual':
-                // Already handled in getFilteredTasks
                 return (a, b) => a.order - b.order;
             default:
                 return (a, b) => new Date(b.createdAt) - new Date(a.createdAt);
@@ -204,6 +219,12 @@ class TaskManager {
     clearCompleted() {
         const completedCount = this.tasks.filter(t => t.completed).length;
         this.tasks = this.tasks.filter(task => !task.completed);
+        
+        // Update order for remaining tasks
+        this.tasks.forEach((task, idx) => {
+            task.order = idx;
+        });
+        
         this.saveTasks();
         return completedCount;
     }
@@ -227,13 +248,11 @@ class TaskManager {
     calculateStreak() {
         if (this.tasks.length === 0) return 0;
         
-        // Get unique completion days using UTC timestamps for timezone safety
         const uniqueDays = new Set();
         
         this.tasks.forEach(task => {
             if (task.completed && task.completedAt) {
                 const date = new Date(task.completedAt);
-                // Use UTC to avoid timezone issues, normalize to start of day
                 const dayKey = Date.UTC(
                     date.getUTCFullYear(),
                     date.getUTCMonth(),
@@ -245,10 +264,7 @@ class TaskManager {
         
         if (uniqueDays.size === 0) return 0;
         
-        // Convert to array and sort descending (most recent first)
         const sortedDays = Array.from(uniqueDays).sort((a, b) => b - a);
-        
-        // Get today's date in UTC (start of day)
         const now = new Date();
         const today = Date.UTC(
             now.getUTCFullYear(),
@@ -256,36 +272,27 @@ class TaskManager {
             now.getUTCDate()
         );
         
-        // Get yesterday in UTC
-        const yesterday = today - 86400000; // 24 hours in milliseconds
-        
-        // Start counting from the most recent completion
+        const yesterday = today - 86400000;
         let streak = 0;
         let expectedDate = today;
         
-        // Check if we have a completion today to start the streak
         if (sortedDays[0] === today) {
             streak = 1;
             expectedDate = yesterday;
         } else if (sortedDays[0] === yesterday) {
-            // Started yesterday, continue checking backward
             streak = 1;
             expectedDate = yesterday - 86400000;
         } else {
-            // Most recent completion is older than yesterday, no active streak
             return 0;
         }
         
-        // Continue checking for consecutive days
         for (let i = 1; i < sortedDays.length; i++) {
             if (sortedDays[i] === expectedDate) {
                 streak++;
-                expectedDate -= 86400000; // Move back one day
+                expectedDate -= 86400000;
             } else if (sortedDays[i] < expectedDate) {
-                // Found a gap, streak ends
                 break;
             }
-            // If sortedDays[i] > expectedDate, it's a duplicate day (shouldn't happen due to Set)
         }
         
         return streak;
@@ -308,7 +315,6 @@ class TaskManager {
                 throw new Error('Invalid data format');
             }
             
-            // Validate and merge tasks
             tasks.forEach(task => {
                 if (!this.tasks.some(t => t.id === task.id)) {
                     this.tasks.push({
@@ -325,6 +331,11 @@ class TaskManager {
                 }
             });
             
+            // Update order for all tasks
+            this.tasks.forEach((task, idx) => {
+                task.order = idx;
+            });
+            
             this.saveTasks();
             return { success: true, count: tasks.length };
         } catch (error) {
@@ -333,7 +344,7 @@ class TaskManager {
     }
 }
 
-// UI Controller with Drag-and-Drop
+// UI Controller with Optimized Partial Updates
 class UIController {
     constructor(taskManager) {
         this.taskManager = taskManager;
@@ -341,6 +352,7 @@ class UIController {
             shortcuts: null,
             export: null
         };
+        this.taskElements = new Map(); // Store task element references
         this.init();
     }
     
@@ -350,7 +362,6 @@ class UIController {
         this.bindEvents();
         this.initTheme();
         this.initDate();
-        this.initDragAndDrop();
         this.render();
     }
     
@@ -414,7 +425,6 @@ class UIController {
     }
     
     initModals() {
-        // Keyboard Shortcuts Modal
         this.modals.shortcuts = {
             element: this.shortcutsModal,
             closeBtn: this.shortcutsModal.querySelector('.modal-close'),
@@ -422,7 +432,6 @@ class UIController {
             isInitialized: false
         };
         
-        // Export Modal
         this.modals.export = {
             element: this.exportModal,
             closeBtn: this.exportModal.querySelector('.modal-close'),
@@ -433,12 +442,10 @@ class UIController {
             isInitialized: false
         };
         
-        // Initialize event listeners for modals
         this.initModalEventListeners();
     }
     
     initModalEventListeners() {
-        // Shortcuts Modal
         if (!this.modals.shortcuts.isInitialized) {
             const closeShortcutsModal = () => this.closeModal('shortcuts');
             
@@ -451,18 +458,15 @@ class UIController {
             this.modals.shortcuts.isInitialized = true;
         }
         
-        // Export Modal
         if (!this.modals.export.isInitialized) {
             const closeExportModal = () => this.closeModal('export');
             
-            // Close buttons
             this.modals.export.closeBtn.addEventListener('click', closeExportModal);
             this.modals.export.cancelBtn.addEventListener('click', closeExportModal);
             this.modals.export.element.addEventListener('click', (e) => {
                 if (e.target === this.modals.export.element) closeExportModal();
             });
             
-            // Export button
             this.modals.export.exportBtn.addEventListener('click', () => {
                 const data = this.taskManager.exportTasks();
                 const blob = new Blob([data], { type: 'application/json' });
@@ -477,7 +481,6 @@ class UIController {
                 this.showToast('Tasks exported successfully!', 'success');
             });
             
-            // Copy button
             this.modals.export.copyBtn.addEventListener('click', async () => {
                 try {
                     await navigator.clipboard.writeText(this.modals.export.exportData.value);
@@ -511,14 +514,14 @@ class UIController {
         // Search
         this.searchInput.addEventListener('input', () => {
             this.taskManager.searchQuery = this.searchInput.value.trim();
-            this.render();
+            this.renderFullTaskList();
             this.clearSearch.style.display = this.taskManager.searchQuery ? 'block' : 'none';
         });
         
         this.clearSearch.addEventListener('click', () => {
             this.searchInput.value = '';
             this.taskManager.searchQuery = '';
-            this.render();
+            this.renderFullTaskList();
             this.clearSearch.style.display = 'none';
         });
         
@@ -528,7 +531,7 @@ class UIController {
                 this.filterButtons.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.taskManager.filter = btn.dataset.filter;
-                this.render();
+                this.renderFullTaskList();
             });
         });
         
@@ -540,7 +543,7 @@ class UIController {
         
         this.sortSelect.addEventListener('change', () => {
             this.taskManager.sort = this.sortSelect.value;
-            this.render();
+            this.renderFullTaskList();
         });
         
         // Clear buttons
@@ -549,7 +552,9 @@ class UIController {
                 const count = this.taskManager.clearCompleted();
                 if (count > 0) {
                     this.showToast(`Cleared ${count} completed task${count > 1 ? 's' : ''}`, 'success');
-                    this.render();
+                    this.renderFullTaskList();
+                    this.updateStats();
+                    this.renderAnalytics();
                 } else {
                     this.showToast('No completed tasks to clear', 'info');
                 }
@@ -561,7 +566,9 @@ class UIController {
                 const count = this.taskManager.clearAll();
                 if (count > 0) {
                     this.showToast(`Cleared ${count} task${count > 1 ? 's' : ''}`, 'success');
-                    this.render();
+                    this.renderFullTaskList();
+                    this.updateStats();
+                    this.renderAnalytics();
                 }
             }
         });
@@ -584,24 +591,20 @@ class UIController {
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            // Ctrl/Cmd + F: Focus search
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
                 e.preventDefault();
                 this.searchInput.focus();
             }
             
-            // ?: Show shortcuts
             if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
                 e.preventDefault();
                 this.showShortcutsModal();
             }
             
-            // Escape: Close modals
             if (e.key === 'Escape') {
                 this.closeAllModals();
             }
             
-            // Space: Toggle completion on selected task
             if (e.key === ' ' && !e.ctrlKey && !e.metaKey) {
                 const focusedElement = document.activeElement;
                 if (!focusedElement.matches('input, textarea, button, select')) {
@@ -609,12 +612,7 @@ class UIController {
                     const taskItem = focusedElement.closest('.task-item');
                     if (taskItem) {
                         const taskId = taskItem.dataset.id;
-                        const checkbox = taskItem.querySelector('.task-checkbox');
-                        if (checkbox) {
-                            checkbox.checked = !checkbox.checked;
-                            this.taskManager.toggleTaskCompletion(taskId);
-                            this.render();
-                        }
+                        this.handleToggleCompletion(taskId, taskItem);
                     }
                 }
             }
@@ -626,134 +624,81 @@ class UIController {
         });
     }
     
-    // NEW: Initialize drag and drop event handlers
-    initDragAndDrop() {
-        // These will be attached to individual task elements in renderTaskList
-    }
+    // ==========================================
+    // OPTIMIZED RENDERING SYSTEM
+    // ==========================================
     
-    // NEW: Setup drag and drop for a task element
-    setupDragAndDrop(taskElement) {
-        const taskId = taskElement.dataset.id;
-        
-        // Drag start
-        taskElement.addEventListener('dragstart', (e) => {
-            this.taskManager.draggedTaskId = taskId;
-            taskElement.classList.add('dragging');
-            
-            // Set drag image (optional)
-            e.dataTransfer.effectAllowed = 'move';
-            
-            // Add some data to satisfy Firefox
-            e.dataTransfer.setData('text/plain', taskId);
-        });
-        
-        // Drag end
-        taskElement.addEventListener('dragend', (e) => {
-            taskElement.classList.remove('dragging');
-            
-            // Remove drag-over class from all tasks
-            document.querySelectorAll('.task-item.drag-over').forEach(item => {
-                item.classList.remove('drag-over');
-            });
-            
-            // Reset dragged task
-            this.taskManager.draggedTaskId = null;
-            this.taskManager.dragTargetId = null;
-        });
-        
-        // Drag over
-        taskElement.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            
-            // Only highlight if it's not the dragged element itself
-            if (this.taskManager.draggedTaskId !== taskId) {
-                taskElement.classList.add('drag-over');
-                this.taskManager.dragTargetId = taskId;
-            }
-        });
-        
-        // Drag leave
-        taskElement.addEventListener('dragleave', (e) => {
-            // Only remove highlight if leaving the element (not just moving between children)
-            if (!taskElement.contains(e.relatedTarget)) {
-                taskElement.classList.remove('drag-over');
-                if (this.taskManager.dragTargetId === taskId) {
-                    this.taskManager.dragTargetId = null;
-                }
-            }
-        });
-        
-        // Drop
-        taskElement.addEventListener('drop', (e) => {
-            e.preventDefault();
-            
-            const draggedId = this.taskManager.draggedTaskId;
-            const targetId = taskId;
-            
-            if (draggedId && targetId && draggedId !== targetId) {
-                // Reorder tasks
-                const success = this.taskManager.reorderTasks(draggedId, targetId);
-                
-                if (success) {
-                    // Update sort to manual
-                    this.sortSelect.value = 'manual';
-                    this.taskManager.sort = 'manual';
-                    
-                    // Re-render
-                    this.render();
-                    
-                    // Show success toast
-                    this.showToast('Task order updated', 'success');
-                }
-            }
-            
-            taskElement.classList.remove('drag-over');
-        });
-    }
-    
-    initTheme() {
-        // Check for saved theme or system preference
-        const savedTheme = localStorage.getItem('theme');
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const theme = savedTheme || (prefersDark ? 'dark' : 'light');
-        
-        document.documentElement.setAttribute('data-theme', theme);
-        this.updateThemeIcon(theme);
-        
-        // Watch for system theme changes
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            if (!localStorage.getItem('theme')) {
-                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
-                this.updateThemeIcon(e.matches ? 'dark' : 'light');
-            }
-        });
-    }
-    
-    initDate() {
-        // Set min date to today
-        const today = new Date().toISOString().split('T')[0];
-        this.dueDate.min = today;
-        
-        // Set current year
-        if (this.currentYear) {
-            this.currentYear.textContent = new Date().getFullYear();
-        }
-    }
-    
+    /**
+     * Main render method - calls specific update methods
+     * Instead of rebuilding everything, it updates only what's needed
+     */
     render() {
-        this.renderTaskList();
-        this.renderStats();
+        this.updateStats();
         this.renderAnalytics();
     }
     
-    renderTaskList() {
+    /**
+     * Update only the task that was toggled
+     */
+    updateTaskElement(taskId, taskData) {
+        const taskElement = this.taskElements.get(taskId);
+        
+        if (!taskElement) {
+            // Element not found, fall back to full render
+            this.renderFullTaskList();
+            return;
+        }
+        
+        // Update completion classes
+        if (taskData.completed) {
+            taskElement.classList.add('completed');
+            taskElement.querySelector('.task-text').classList.add('completed');
+        } else {
+            taskElement.classList.remove('completed');
+            taskElement.querySelector('.task-text').classList.remove('completed');
+        }
+        
+        // Update checkbox
+        const checkbox = taskElement.querySelector('.task-checkbox');
+        if (checkbox) {
+            checkbox.checked = taskData.completed;
+        }
+        
+        // Update stats
+        this.updateStats();
+    }
+    
+    /**
+     * Update only the task text after editing
+     */
+    updateTaskText(taskId, newText) {
+        const taskElement = this.taskElements.get(taskId);
+        
+        if (taskElement) {
+            const taskText = taskElement.querySelector('.task-text');
+            if (taskText) {
+                taskText.textContent = newText;
+            }
+        } else {
+            // Fallback
+            this.renderFullTaskList();
+        }
+    }
+    
+    /**
+     * Full task list render (only when necessary)
+     */
+    renderFullTaskList() {
         const tasks = this.taskManager.getFilteredTasks();
         
         if (tasks.length === 0) {
             this.renderEmptyState();
+            this.taskElements.clear();
             return;
         }
+        
+        // Clear existing task elements map
+        this.taskElements.clear();
         
         const fragment = document.createDocumentFragment();
         
@@ -761,30 +706,39 @@ class UIController {
             const taskElement = this.createTaskElement(task);
             fragment.appendChild(taskElement);
             
-            // Setup drag and drop for this element
-            this.setupDragAndDrop(taskElement);
+            // Store reference for partial updates
+            this.taskElements.set(task.id, taskElement);
         });
         
         this.taskList.innerHTML = '';
         this.taskList.appendChild(fragment);
     }
     
+    /**
+     * Create a single task element with optimized event handlers
+     */
     createTaskElement(task) {
         const div = document.createElement('div');
         div.className = `task-item priority-${task.priority} ${task.completed ? 'completed' : ''}`;
         div.dataset.id = task.id;
         div.draggable = true;
-        div.tabIndex = 0; // Make task focusable for keyboard accessibility
+        div.tabIndex = 0;
         div.setAttribute('aria-label', `Task: ${task.text}. Drag to reorder.`);
         
-        // Checkbox
+        // Drag handle
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'drag-handle';
+        dragHandle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+        dragHandle.title = 'Drag to reorder';
+        dragHandle.setAttribute('aria-label', 'Drag handle');
+        
+        // Checkbox with optimized handler
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.className = 'task-checkbox';
         checkbox.checked = task.completed;
         checkbox.addEventListener('change', () => {
-            this.taskManager.toggleTaskCompletion(task.id);
-            this.render();
+            this.handleToggleCompletion(task.id, div);
         });
         
         // Content
@@ -792,7 +746,7 @@ class UIController {
         content.className = 'task-content';
         
         const text = document.createElement('div');
-        text.className = 'task-text';
+        text.className = `task-text ${task.completed ? 'completed' : ''}`;
         text.textContent = task.text;
         
         const meta = document.createElement('div');
@@ -834,7 +788,7 @@ class UIController {
         editBtn.title = 'Edit task';
         editBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.editTask(task, text);
+            this.handleEditTask(task, text, div);
         });
         
         const deleteBtn = document.createElement('button');
@@ -843,67 +797,229 @@ class UIController {
         deleteBtn.title = 'Delete task';
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.deleteTask(task.id);
+            this.handleDeleteTask(task.id, div);
         });
         
         actions.appendChild(editBtn);
         actions.appendChild(deleteBtn);
-        
-        // NEW: Drag handle
-        const dragHandle = document.createElement('div');
-        dragHandle.className = 'drag-handle';
-        dragHandle.innerHTML = '<i class="fas fa-grip-vertical"></i>';
-        dragHandle.title = 'Drag to reorder';
-        dragHandle.setAttribute('aria-label', 'Drag handle');
         
         div.appendChild(dragHandle);
         div.appendChild(checkbox);
         div.appendChild(content);
         div.appendChild(actions);
         
+        // Setup drag and drop for this element
+        this.setupDragAndDrop(div, task.id);
+        
         return div;
     }
     
-    getCategoryLabel(category) {
-        const labels = {
-            homework: '📚 Homework',
-            project: '💼 Project',
-            study: '📖 Study',
-            exam: '📝 Exam',
-            reading: '📕 Reading',
-            other: '📌 Other'
-        };
-        return labels[category] || category;
+    /**
+     * Setup drag and drop for a task element
+     */
+    setupDragAndDrop(taskElement, taskId) {
+        taskElement.addEventListener('dragstart', (e) => {
+            this.taskManager.draggedTaskId = taskId;
+            taskElement.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', taskId);
+        });
+        
+        taskElement.addEventListener('dragend', (e) => {
+            taskElement.classList.remove('dragging');
+            document.querySelectorAll('.task-item.drag-over').forEach(item => {
+                item.classList.remove('drag-over');
+            });
+            this.taskManager.draggedTaskId = null;
+            this.taskManager.dragTargetId = null;
+        });
+        
+        taskElement.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            
+            if (this.taskManager.draggedTaskId !== taskId) {
+                taskElement.classList.add('drag-over');
+                this.taskManager.dragTargetId = taskId;
+            }
+        });
+        
+        taskElement.addEventListener('dragleave', (e) => {
+            if (!taskElement.contains(e.relatedTarget)) {
+                taskElement.classList.remove('drag-over');
+                if (this.taskManager.dragTargetId === taskId) {
+                    this.taskManager.dragTargetId = null;
+                }
+            }
+        });
+        
+        taskElement.addEventListener('drop', (e) => {
+            e.preventDefault();
+            
+            const draggedId = this.taskManager.draggedTaskId;
+            const targetId = taskId;
+            
+            if (draggedId && targetId && draggedId !== targetId) {
+                const success = this.taskManager.reorderTasks(draggedId, targetId);
+                
+                if (success) {
+                    this.sortSelect.value = 'manual';
+                    this.taskManager.sort = 'manual';
+                    this.renderFullTaskList(); // Need full re-render for reordering
+                    this.showToast('Task order updated', 'success');
+                }
+            }
+            
+            taskElement.classList.remove('drag-over');
+        });
     }
     
-    formatDueDate(dateString) {
-        const date = new Date(dateString);
-        const today = new Date();
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
+    // ==========================================
+    // OPTIMIZED EVENT HANDLERS
+    // ==========================================
+    
+    handleToggleCompletion(taskId, taskElement) {
+        const updatedTask = this.taskManager.toggleTaskCompletion(taskId);
         
-        const isToday = date.toDateString() === today.toDateString();
-        const isTomorrow = date.toDateString() === tomorrow.toDateString();
-        const isOverdue = date < today && !isToday;
+        if (updatedTask) {
+            // Partial update - only update the affected task
+            this.updateTaskElement(taskId, updatedTask);
+            
+            // Update analytics if they're visible
+            if (!this.analyticsSection.classList.contains('collapsed')) {
+                this.renderAnalytics();
+            }
+        }
+    }
+    
+    handleEditTask(task, textElement, taskElement) {
+        const originalText = textElement.textContent;
         
-        let text = date.toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric' 
-        });
-        let indicator = '';
+        textElement.contentEditable = true;
+        textElement.focus();
         
-        if (isToday) {
-            text = 'Today';
-            indicator = 'today';
-        } else if (isTomorrow) {
-            text = 'Tomorrow';
-            indicator = 'tomorrow';
-        } else if (isOverdue) {
-            text = 'Overdue';
-            indicator = 'overdue';
+        const range = document.createRange();
+        range.selectNodeContents(textElement);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        
+        const finishEdit = () => {
+            textElement.contentEditable = false;
+            const newText = textElement.textContent.trim();
+            
+            if (newText && newText !== originalText) {
+                this.taskManager.updateTask(task.id, { text: newText });
+                this.showToast('Task updated', 'success');
+                // No need to re-render - text is already updated
+            } else {
+                textElement.textContent = originalText;
+            }
+        };
+        
+        const handleKey = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                finishEdit();
+            } else if (e.key === 'Escape') {
+                textElement.textContent = originalText;
+                textElement.contentEditable = false;
+            }
+        };
+        
+        textElement.addEventListener('keydown', handleKey);
+        textElement.addEventListener('blur', finishEdit, { once: true });
+    }
+    
+    handleDeleteTask(id, taskElement) {
+        if (confirm('Delete this task?')) {
+            const deletedTask = this.taskManager.deleteTask(id);
+            if (deletedTask) {
+                // Remove from DOM immediately
+                taskElement.remove();
+                
+                // Update stats
+                this.updateStats();
+                
+                // Show undo toast
+                this.showUndoToast('Task deleted', () => {
+                    const restoredTask = this.taskManager.undoDelete();
+                    if (restoredTask) {
+                        // Add task back to the beginning
+                        const newTaskElement = this.createTaskElement(restoredTask);
+                        this.taskList.prepend(newTaskElement);
+                        this.taskElements.set(restoredTask.id, newTaskElement);
+                        this.updateStats();
+                        this.renderAnalytics();
+                        this.showToast('Task restored', 'success');
+                    }
+                });
+            }
+        }
+    }
+    
+    handleAddTask() {
+        const text = this.taskInput.value.trim();
+        const priority = this.prioritySelect.value;
+        const category = this.categorySelect.value;
+        const dueDate = this.dueDate.value;
+        
+        if (!text) {
+            this.showError('Please enter a task description');
+            return;
         }
         
-        return { text, indicator };
+        const newTask = this.taskManager.addTask({
+            text,
+            priority,
+            category,
+            dueDate: dueDate || null
+        });
+        
+        // Clear form
+        this.taskInput.value = '';
+        this.categorySelect.value = '';
+        this.dueDate.value = '';
+        
+        // Add task to the beginning of the list
+        const taskElement = this.createTaskElement(newTask);
+        this.taskList.prepend(taskElement);
+        this.taskElements.set(newTask.id, taskElement);
+        
+        // Update stats and analytics
+        this.updateStats();
+        this.renderAnalytics();
+        
+        this.showToast('Task added successfully!', 'success');
+        this.taskInput.focus();
+    }
+    
+    // ==========================================
+    // STATS & ANALYTICS METHODS
+    // ==========================================
+    
+    updateStats() {
+        const stats = this.taskManager.getStats();
+        
+        // Update counters
+        this.totalTasks.textContent = stats.total;
+        this.pendingTasks.textContent = stats.pending;
+        this.completedTasks.textContent = stats.completed;
+        this.productivityScore.textContent = `${stats.productivity}%`;
+        
+        // Update filter counts
+        this.filterCounts.all.textContent = stats.total;
+        this.filterCounts.pending.textContent = stats.pending;
+        this.filterCounts.completed.textContent = stats.completed;
+        
+        // Update productivity ring
+        const circumference = 2 * Math.PI * 36;
+        const offset = circumference - (stats.productivity / 100) * circumference;
+        this.productivityRing.style.strokeDashoffset = offset;
+        
+        // Calculate streak
+        const streak = this.taskManager.calculateStreak();
+        this.streakCount.textContent = streak;
     }
     
     renderEmptyState() {
@@ -940,30 +1056,6 @@ class UIController {
                 <p>${description}</p>
             </div>
         `;
-    }
-    
-    renderStats() {
-        const stats = this.taskManager.getStats();
-        
-        // Update counters
-        this.totalTasks.textContent = stats.total;
-        this.pendingTasks.textContent = stats.pending;
-        this.completedTasks.textContent = stats.completed;
-        this.productivityScore.textContent = `${stats.productivity}%`;
-        
-        // Update filter counts
-        this.filterCounts.all.textContent = stats.total;
-        this.filterCounts.pending.textContent = stats.pending;
-        this.filterCounts.completed.textContent = stats.completed;
-        
-        // Update productivity ring
-        const circumference = 2 * Math.PI * 36;
-        const offset = circumference - (stats.productivity / 100) * circumference;
-        this.productivityRing.style.strokeDashoffset = offset;
-        
-        // Calculate streak using the improved function
-        const streak = this.taskManager.calculateStreak();
-        this.streakCount.textContent = streak;
     }
     
     renderAnalytics() {
@@ -1024,18 +1116,6 @@ class UIController {
         }
     }
     
-    getCategoryIcon(category) {
-        const icons = {
-            homework: '📚',
-            project: '💼',
-            study: '📖',
-            exam: '📝',
-            reading: '📕',
-            other: '📌'
-        };
-        return icons[category] || '📌';
-    }
-    
     renderInsights() {
         const stats = this.taskManager.getStats();
         const tasks = this.taskManager.tasks;
@@ -1053,7 +1133,6 @@ class UIController {
                 insights.push(`Keep going! ${stats.productivity}% completion rate.`);
             }
             
-            // Streak insight
             if (streak > 0) {
                 if (streak >= 7) {
                     insights.push(`🔥 Amazing ${streak}-day streak! Keep it up!`);
@@ -1094,84 +1173,62 @@ class UIController {
             .join('');
     }
     
-    handleAddTask() {
-        const text = this.taskInput.value.trim();
-        const priority = this.prioritySelect.value;
-        const category = this.categorySelect.value;
-        const dueDate = this.dueDate.value;
+    // ==========================================
+    // UTILITY METHODS
+    // ==========================================
+    
+    getCategoryLabel(category) {
+        const labels = {
+            homework: '📚 Homework',
+            project: '💼 Project',
+            study: '📖 Study',
+            exam: '📝 Exam',
+            reading: '📕 Reading',
+            other: '📌 Other'
+        };
+        return labels[category] || category;
+    }
+    
+    getCategoryIcon(category) {
+        const icons = {
+            homework: '📚',
+            project: '💼',
+            study: '📖',
+            exam: '📝',
+            reading: '📕',
+            other: '📌'
+        };
+        return icons[category] || '📌';
+    }
+    
+    formatDueDate(dateString) {
+        const date = new Date(dateString);
+        const today = new Date();
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
         
-        if (!text) {
-            this.showError('Please enter a task description');
-            return;
-        }
+        const isToday = date.toDateString() === today.toDateString();
+        const isTomorrow = date.toDateString() === tomorrow.toDateString();
+        const isOverdue = date < today && !isToday;
         
-        this.taskManager.addTask({
-            text,
-            priority,
-            category,
-            dueDate: dueDate || null
+        let text = date.toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric' 
         });
+        let indicator = '';
         
-        this.taskInput.value = '';
-        this.categorySelect.value = '';
-        this.dueDate.value = '';
-        
-        this.showToast('Task added successfully!', 'success');
-        this.render();
-        this.taskInput.focus();
-    }
-    
-    editTask(task, textElement) {
-        const originalText = textElement.textContent;
-        
-        textElement.contentEditable = true;
-        textElement.focus();
-        
-        const range = document.createRange();
-        range.selectNodeContents(textElement);
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
-        
-        const finishEdit = () => {
-            textElement.contentEditable = false;
-            const newText = textElement.textContent.trim();
-            
-            if (newText && newText !== originalText) {
-                this.taskManager.updateTask(task.id, { text: newText });
-                this.showToast('Task updated', 'success');
-                this.render();
-            } else {
-                textElement.textContent = originalText;
-            }
-        };
-        
-        const handleKey = (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                finishEdit();
-            } else if (e.key === 'Escape') {
-                textElement.textContent = originalText;
-                textElement.contentEditable = false;
-            }
-        };
-        
-        textElement.addEventListener('keydown', handleKey);
-        textElement.addEventListener('blur', finishEdit, { once: true });
-    }
-    
-    deleteTask(id) {
-        if (confirm('Delete this task?')) {
-            const deletedTask = this.taskManager.deleteTask(id);
-            if (deletedTask) {
-                this.showUndoToast('Task deleted', () => {
-                    this.taskManager.undoDelete();
-                    this.showToast('Task restored', 'success');
-                    this.render();
-                });
-                this.render();
-            }
+        if (isToday) {
+            text = 'Today';
+            indicator = 'today';
+        } else if (isTomorrow) {
+            text = 'Tomorrow';
+            indicator = 'tomorrow';
+        } else if (isOverdue) {
+            text = 'Overdue';
+            indicator = 'overdue';
         }
+        
+        return { text, indicator };
     }
     
     toggleTheme() {
@@ -1209,7 +1266,9 @@ class UIController {
                 
                 if (result.success) {
                     this.showToast(`Imported ${result.count} tasks!`, 'success');
-                    this.render();
+                    this.renderFullTaskList();
+                    this.updateStats();
+                    this.renderAnalytics();
                 } else {
                     this.showToast(`Import failed: ${result.error}`, 'error');
                 }
@@ -1311,6 +1370,31 @@ class UIController {
             this.errorMessage.style.display = 'none';
         }, 3000);
     }
+    
+    initTheme() {
+        const savedTheme = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+        
+        document.documentElement.setAttribute('data-theme', theme);
+        this.updateThemeIcon(theme);
+        
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!localStorage.getItem('theme')) {
+                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+                this.updateThemeIcon(e.matches ? 'dark' : 'light');
+            }
+        });
+    }
+    
+    initDate() {
+        const today = new Date().toISOString().split('T')[0];
+        this.dueDate.min = today;
+        
+        if (this.currentYear) {
+            this.currentYear.textContent = new Date().getFullYear();
+        }
+    }
 }
 
 // Initialize the application
@@ -1323,12 +1407,12 @@ document.addEventListener('DOMContentLoaded', () => {
         window.taskManager = taskManager;
         window.uiController = uiController;
         
-        console.log('✅ TaskFlow Pro initialized with drag-and-drop!');
+        console.log('✅ TaskFlow Pro initialized with optimized rendering!');
         console.log('📋 Features:');
+        console.log('  • Partial DOM updates for toggle/edit');
+        console.log('  • Full re-renders only for add/delete/reorder');
         console.log('  • Drag and drop reordering');
-        console.log('  • Visual feedback while dragging');
-        console.log('  • Order persists in localStorage');
-        console.log('  • Production-ready implementation');
+        console.log('  • Production-ready performance');
         
     } catch (error) {
         console.error('❌ Failed to initialize:', error);
